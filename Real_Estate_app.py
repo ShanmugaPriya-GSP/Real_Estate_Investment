@@ -1,16 +1,18 @@
 
 import streamlit as st
 import pandas as pd
+import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(page_title="Real Estate Investment Advisor", layout="wide")
 
 st.title("🏠 Real Estate Investment Advisor")
 st.write("Predict Good Investment and Future Property Price")
 
+# -------------------------------
+# LOAD DATA
+# -------------------------------
 @st.cache_data
 def load_data():
     df = pd.read_csv("india_housing_prices.csv")
@@ -28,43 +30,48 @@ def load_data():
     median_price_sqft = df["Price_per_SqFt"].median()
     df["Good_Investment"] = (df["Price_per_SqFt"] <= median_price_sqft).astype(int)
 
+    df["Future_Price_5Y"] = df["Price_in_Lakhs"] * ((1 + 0.08) ** 5)
+
     return df
 
 df = load_data()
 
-drop_cols = ["ID", "Locality", "Amenities"]
+# -------------------------------
+# ENCODING FOR FEATURE COLUMNS
+# -------------------------------
+drop_cols = ["ID"]
 df_model = df.drop(columns=drop_cols, errors="ignore")
 
 df_encoded = pd.get_dummies(df_model, drop_first=True)
 
-st.sidebar.write("Encoded shape:", df_encoded.shape)
+X = df_encoded.drop(
+    ["Good_Investment", "Future_Price_5Y"],
+    axis=1
+)
 
+feature_columns = pickle.load(open("feature_columns.pkl", "rb"))
+# -------------------------------
+# LOAD SAVED MODELS
+# -------------------------------
 @st.cache_resource
-def train_model(df_encoded):
-    sample_df = df_encoded.sample(n=min(50000, len(df_encoded)), random_state=42)
+def load_models():
+    clf = pickle.load(open("classification_model.pkl", "rb"))
+    reg = pickle.load(open("regression_model.pkl", "rb"))
+    return clf, reg
 
-    X = sample_df.drop(["Good_Investment"], axis=1)
-    y = sample_df["Good_Investment"]
+clf, reg = load_models()
 
-    clf = RandomForestClassifier(
-        n_estimators=50,
-        max_depth=10,
-        random_state=42,
-        n_jobs=-1
-    )
+st.success("Models loaded successfully!")
 
-    clf.fit(X, y)
-
-    return clf, X.columns
-
-with st.spinner("Training model..."):
-    clf, feature_columns = train_model(df_encoded)
-
-st.success("Model trained successfully!")
-
+# -------------------------------
+# DATA PREVIEW
+# -------------------------------
 st.subheader("Dataset Preview")
 st.dataframe(df.head())
 
+# -------------------------------
+# EDA
+# -------------------------------
 st.subheader("EDA Visualizations")
 
 chart = st.selectbox(
@@ -87,7 +94,12 @@ if chart == "Price Distribution":
 elif chart == "Size vs Price":
     fig, ax = plt.subplots(figsize=(8, 5))
     sample_chart = df.sample(n=min(5000, len(df)), random_state=42)
-    sns.scatterplot(x="Size_in_SqFt", y="Price_in_Lakhs", data=sample_chart, ax=ax)
+    sns.scatterplot(
+        x="Size_in_SqFt",
+        y="Price_in_Lakhs",
+        data=sample_chart,
+        ax=ax
+    )
     ax.set_title("Size vs Price")
     st.pyplot(fig)
 
@@ -98,6 +110,7 @@ elif chart == "Average Price by City":
         .sort_values(ascending=False)
         .head(10)
     )
+
     fig, ax = plt.subplots(figsize=(10, 5))
     city_price.plot(kind="bar", ax=ax)
     ax.set_title("Top 10 Cities by Average Property Price")
@@ -117,6 +130,9 @@ elif chart == "Correlation Heatmap":
     ax.set_title("Correlation Heatmap")
     st.pyplot(fig)
 
+# -------------------------------
+# INPUT FORM
+# -------------------------------
 st.header("Property Prediction")
 
 col1, col2 = st.columns(2)
@@ -127,15 +143,25 @@ with col1:
     current_price = st.number_input("Current Price in Lakhs", min_value=1.0, value=50.0)
     area = st.number_input("Size in SqFt", min_value=100, value=1000)
     bhk = st.number_input("BHK", min_value=1, value=2)
-    price_sqft = st.number_input("Price per SqFt", min_value=0.0, value=1.0)
 
 with col2:
+    price_sqft = st.number_input(
+        "Price per SqFt",
+        min_value=0.0,
+        value=0.10,
+        step=0.01,
+        format="%.2f"
+    )
+
     property_type = st.selectbox("Property Type", sorted(df["Property_Type"].unique()))
     furnished_status = st.selectbox("Furnished Status", sorted(df["Furnished_Status"].unique()))
     age = st.number_input("Age of Property", min_value=0, value=5)
     floor_no = st.number_input("Floor Number", min_value=0, value=1)
     total_floors = st.number_input("Total Floors", min_value=1, value=5)
 
+# -------------------------------
+# PREDICTION
+# -------------------------------
 if st.button("Predict"):
     input_data = {col: 0 for col in feature_columns}
 
@@ -177,10 +203,10 @@ if st.button("Predict"):
         input_data[furnished_col] = 1
 
     input_df = pd.DataFrame([input_data])
+    input_df = input_df[feature_columns]
 
     investment_pred = clf.predict(input_df)[0]
-
-    future_price = current_price * ((1 + 0.08) ** 5)
+    future_price = reg.predict(input_df)[0]
 
     st.subheader("Prediction Result")
 
