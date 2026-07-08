@@ -127,7 +127,7 @@ with col1:
     current_price = st.number_input("Current Price in Lakhs", min_value=1.0, value=50.0)
     area = st.number_input("Size in SqFt", min_value=100, value=1000)
     bhk = st.number_input("BHK", min_value=1, value=2)
-    price_sqft = st.number_input("Price per SqFt", min_value=1000, value=5000)
+    price_sqft = st.number_input("Price per SqFt", min_value=0.0, value=1.0)
 
 with col2:
     property_type = st.selectbox("Property Type", sorted(df["Property_Type"].unique()))
